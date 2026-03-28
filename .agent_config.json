@@ -1,0 +1,14 @@
+{
+  "test_command": "pytest tests/ -v",
+  "test_timeout": 60,
+  "setup_commands": [
+    "pip install -r requirements.txt"
+  ],
+  "env": {
+    "PYTHONPATH": "."
+  },
+  "max_explore_calls": 30,
+  "min_confidence": 0.6,
+  "skip_categories": [],
+  "description": "TaskFlow API — simple task management FastAPI service with seeded bugs for agent testing"
+}
