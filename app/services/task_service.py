@@ -33,7 +33,8 @@ def create_task(
     due_date: Optional[datetime] = None,
     assignee_id: Optional[int] = None,
 ) -> Task:
-    # BUG-2: no validation that priority is in [1, 2, 3]
+    if priority not in (1, 2, 3):
+        raise ValueError(f"Invalid priority {priority!r}: priority must be 1, 2, or 3")
     task = Task(
         title=title,
         description=description,
@@ -61,8 +62,7 @@ def list_tasks(
     if not include_archived:
         query = query.filter(Task.is_archived == False)  # noqa: E712
 
-    # BUG-1: should be (page - 1) * limit, not page * limit
-    offset = page * limit
+    offset = (page - 1) * limit
     return query.offset(offset).limit(limit).all()
 
 
@@ -77,10 +77,9 @@ def get_tasks_by_user(db: Session, user_id: int) -> List[Task]:
 
 def get_overdue_tasks(db: Session) -> List[Task]:
     now = datetime.utcnow()
-    # BUG-6: >= returns tasks due in the future, should be <
     return (
         db.query(Task)
-        .filter(Task.due_date >= now, Task.is_completed == False)  # noqa: E712
+        .filter(Task.due_date < now, Task.is_completed == False)  # noqa: E712
         .all()
     )
 
@@ -94,9 +93,7 @@ def complete_task(db: Session, task_id: int) -> Optional[Task]:
     if task is None:
         return None
 
-    # BUG-4: completed_at is set ONLY when task was already completed.
-    # On first completion, is_completed is False so the branch is skipped.
-    if task.is_completed:
+    if not task.is_completed:
         task.completed_at = datetime.utcnow()
 
     task.is_completed = True
@@ -114,7 +111,9 @@ def assign_task(db: Session, task_id: int, user_id: int) -> Optional[Task]:
     if user is None:
         return None
 
-    # BUG-3: no check for user.is_active — deactivated users can receive tasks
+    if not user.is_active:
+        return None
+
     task.assignee_id = user_id
     db.commit()
     db.refresh(task)

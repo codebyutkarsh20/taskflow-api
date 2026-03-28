@@ -138,3 +138,95 @@ def test_list_tasks_excludes_archived_by_default(db):
     tasks = task_service.list_tasks(db, page=1, limit=10)
     titles = [t.title for t in tasks]
     assert "Archived" not in titles
+
+
+# ---------------------------------------------------------------------------
+# Acceptance-criteria tests for all fixed bugs
+# ---------------------------------------------------------------------------
+
+def test_list_tasks_page2_offset_is_10(db):
+    """page=2, limit=10 must use offset=10 (i.e. (page-1)*limit)."""
+    for i in range(25):
+        task_service.create_task(db, title=f"Task {i}")
+
+    page1 = task_service.list_tasks(db, page=1, limit=10)
+    page2 = task_service.list_tasks(db, page=2, limit=10)
+
+    assert len(page1) == 10, f"Page 1 should have 10 tasks, got {len(page1)}"
+    assert len(page2) == 10, f"Page 2 should have 10 tasks, got {len(page2)}"
+    page1_ids = {t.id for t in page1}
+    page2_ids = {t.id for t in page2}
+    assert page1_ids.isdisjoint(page2_ids), "Page 1 and page 2 must not overlap"
+
+
+def test_create_task_rejects_priority_zero(db):
+    """priority=0 must raise ValueError mentioning 'priority'."""
+    with pytest.raises(ValueError, match="priority"):
+        task_service.create_task(db, title="Bad", priority=0)
+
+
+def test_create_task_rejects_priority_four(db):
+    """priority=4 must raise ValueError mentioning 'priority'."""
+    with pytest.raises(ValueError, match="priority"):
+        task_service.create_task(db, title="Bad", priority=4)
+
+
+def test_create_task_accepts_valid_priorities(db):
+    """Priorities 1, 2, 3 must be accepted without error."""
+    for p in (1, 2, 3):
+        t = task_service.create_task(db, title=f"P{p} task", priority=p)
+        assert t.priority == p
+
+
+def test_assign_task_inactive_user_returns_none(db):
+    """assign_task must return None when the target user is inactive."""
+    user = make_user(db, username="bob", email="bob@example.com")
+    user_service.deactivate_user(db, user.id)
+
+    task = task_service.create_task(db, title="Need assignee")
+    result = task_service.assign_task(db, task.id, user.id)
+    assert result is None, "Expected None when assigning to inactive user"
+
+
+def test_assign_task_active_user_succeeds(db):
+    """assign_task must succeed when the target user is active."""
+    user = make_user(db, username="carol", email="carol@example.com")
+    task = task_service.create_task(db, title="Need assignee")
+    result = task_service.assign_task(db, task.id, user.id)
+    assert result is not None
+    assert result.assignee_id == user.id
+
+
+def test_complete_task_sets_completed_at_on_first_call(db):
+    """completed_at must be populated on the very first complete_task call."""
+    task = task_service.create_task(db, title="Do me")
+    assert task.is_completed is False or task.is_completed == 0
+
+    before = datetime.utcnow()
+    completed = task_service.complete_task(db, task.id)
+    after = datetime.utcnow()
+
+    assert completed.is_completed is True
+    assert completed.completed_at is not None, "completed_at must not be None after first completion"
+    assert before <= completed.completed_at <= after, "completed_at must fall within the call window"
+
+
+def test_get_overdue_tasks_excludes_future_tasks(db):
+    """Tasks with due_date in the future must NOT appear in overdue list."""
+    future = datetime.utcnow() + timedelta(days=7)
+    task_service.create_task(db, title="Future task", due_date=future)
+
+    overdue = task_service.get_overdue_tasks(db)
+    titles = [t.title for t in overdue]
+    assert "Future task" not in titles
+
+
+def test_get_overdue_tasks_includes_past_tasks(db):
+    """Tasks with due_date in the past must appear in overdue list."""
+    past = datetime.utcnow() - timedelta(days=1)
+    task_service.create_task(db, title="Past due task", due_date=past)
+
+    overdue = task_service.get_overdue_tasks(db)
+    titles = [t.title for t in overdue]
+    assert "Past due task" in titles
+
